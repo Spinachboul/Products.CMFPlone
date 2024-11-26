@@ -1,23 +1,28 @@
+import csv
 from csv import writer
 import warnings
+
 from DateTime import DateTime
 from DateTime.interfaces import DateTimeError
+
+from urllib.parse import urlparse
 from io import StringIO
+
 from plone.app.redirector.interfaces import IRedirectionStorage
 from plone.base.batch import Batch
 from plone.base.utils import safe_text
 from plone.batching.browser import PloneBatchView
 from plone.memoize.view import memoize
+
 from Products.CMFCore.utils import getToolByName
 from Products.Five.browser import BrowserView
 from Products.statusmessages.interfaces import IStatusMessage
-from urllib.parse import urlparse
+
 from zope.component import getMultiAdapter
 from zope.component import getUtility
 from zope.component.hooks import getSite
 from zope.i18nmessageid import MessageFactory
 
-import csv
 import logging
 import tempfile
 
@@ -486,7 +491,7 @@ class RedirectsControlPanel(BrowserView):
                 ),
             )
 
-    def download(self):
+    def download(self, start = None, end = None, datetime_filter = None):
         """Download all redirects as CSV.
 
         We save to a temporary file and try to stream it as a blob:
@@ -509,15 +514,25 @@ class RedirectsControlPanel(BrowserView):
             for old_path, new_info in paths.items():
                 if old_path.startswith(portal_path):
                     old_path = old_path[len_portal_path:]
-                row = [old_path]
                 if not isinstance(new_info, tuple):
-                    # Old data: only a single path, no date and manual boolean.
-                    new_info = (new_info,)
-                row.extend(new_info)
-                new_path = row[1]
+                    new_info = (new_info, None, None) # Placeholder for datetime and manual
+                new_path = new_info[0]
                 if new_path.startswith(portal_path):
-                    row[1] = new_path[len_portal_path:]
-                csv_writer.writerow(row)
+                    new_info = (new_path[len_portal_path:], *new_info[1:])
+                
+                # Apply filter logic
+                record_datetime = new_info[1]
+                if datetime_filter and record_datetime:
+                    try:
+                        record_datetime = DateTime.fromisoformat(record_datetime)
+                    except ValueError:
+                        continue # Skip the invalid date time formats
+                
+                    if start and DateTime.fromisoformat(start) > record_datetime:
+                        continue
+                    if end and DateTime.fromisoformat(end) < record_datetime:
+                        continue
+                csv_writer.writerow((old_path, *new_info))
         with open(file_path) as stream:
             contents = stream.read()
             length = len(contents)
